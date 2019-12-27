@@ -1,0 +1,465 @@
+user nginx;
+worker_processes  auto;
+pid /run/nginx.pid;
+worker_rlimit_nofile 8192;
+
+events {
+    worker_connections 1024;
+    use epoll;
+    multi_accept on;
+}
+
+## General Configurations Nginx
+http {
+    include       mime.types;
+    default_type  application/octet-stream;
+    #limit_conn_zone $binary_remote_addr zone=conn_limit_per_ip:10m;
+    #limit_req_zone $binary_remote_addr zone=req_limit_per_ip:10m rate=5r/s;
+
+    # https://www.digitalocean.com/community/tutorials/how-to-optimize-nginx-configuration
+    client_body_timeout 10;
+    client_header_timeout 10;
+    client_max_body_size 50M;
+    client_body_buffer_size 1m;
+    keepalive_timeout 60;
+    keepalive_requests 100000;
+    send_timeout 5;
+    reset_timedout_connection on;
+    types_hash_max_size 2048;
+
+    # reduce the data that needs to be sent over network -- for testing environment
+    gzip on;
+    gzip_disable "msie6";
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_min_length 10240;
+    gzip_comp_level 6;
+    gzip_buffers 16 8k;
+    gzip_http_version 1.1;
+    gzip_types 
+        # text/html is always compressed by HttpGzipModule
+        text/css
+        text/javascript
+        text/xml
+        text/plain
+        text/x-component
+        application/javascript
+        application/x-javascript
+        application/json
+        application/xml
+        application/rss+xml
+        application/atom+xml
+        font/truetype
+        font/opentype
+        application/vnd.ms-fontobject
+        image/svg+xml;
+
+    #PHP
+    fastcgi_buffers 256 32k;
+    fastcgi_buffer_size 256k;
+    fastcgi_connect_timeout 4s;
+    fastcgi_send_timeout 120s;
+    fastcgi_read_timeout 120s;
+    fastcgi_busy_buffers_size 512k;
+    fastcgi_temp_file_write_size 512K;
+
+    #Others
+    open_file_cache max=2000 inactive=20s;
+    open_file_cache_valid 60s;
+    open_file_cache_min_uses 5;
+    open_file_cache_errors off;
+    # faster than read() + write()
+    sendfile on;
+    tcp_nopush on;
+    # send headers in one piece, it is better than sending them one by one
+    tcp_nodelay on;
+        
+    # set max upload size
+    #client_max_body_size 512M;
+    #fastcgi_buffers 64 4K;
+        
+    log_format  main_timed  '$remote_addr - $remote_user [$time_local] "$request" '
+                            '$status $body_bytes_sent "$http_referer" '
+                            '"$http_user_agent" "$http_x_forwarded_for" '
+                            '$request_time $upstream_response_time $pipe $upstream_cache_status';
+    access_log /dev/stdout main_timed;
+    error_log /dev/stderr info;
+    include /etc/nginx/sites-enabled/*;
+    
+    # para parametros como 'app_version'
+    underscores_in_headers off;
+    
+    ##Common headers for security
+    add_header Feature-Policy "geolocation none;midi none;notifications none;push none;sync-xhr none;microphone none;camera none;magnetometer none;gyroscope none;speaker self;vibrate none;fullscreen self;payment none;";
+
+    # you can tell the browser that it can only download content from the domains you explicitly allow
+    #add_header Content-Security-Policy "frame-ancestors 'self';";
+    add_header Content-Security-Policy "http://10.71.1.187/ http://10.71.1.187:7001/;";
+    
+    
+    
+    add_header Location "http://codeitworld.com" always;
+    add_header Referrer-Policy "same-origin";
+    #add_header Server Application;
+    add_header X-Akamai-Transformed "9 - 0 pmb=mTOE,1";
+        
+    # This header enables the Cross-site scripting (XSS) filter built into most recent web browsers.
+    # It's usually enabled by default anyway, so the role of this header is to re-enable the filter for 
+    # this particular website if it was disabled by the user.
+    # https://www.owasp.org/index.php/List_of_useful_HTTP_headers
+    add_header X-XSS-Protection "1; mode=block" always;
+        
+    # when serving user-supplied content, include a X-Content-Type-Options: nosniff header along with the Content-Type: header,
+    # to disable content-type sniffing on some browsers.
+    # https://www.owasp.org/index.php/List_of_useful_HTTP_headers
+    # currently suppoorted in IE > 8 http://blogs.msdn.com/b/ie/archive/2008/09/02/ie8-security-part-vi-beta-2-update.aspx
+    # http://msdn.microsoft.com/en-us/library/ie/gg622941(v=vs.85).aspx
+    # 'soon' on Firefox https://bugzilla.mozilla.org/show_bug.cgi?id=471020
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Proxy-Cache "BYPASS";
+    add_header X-Permitted-Cross-Domain-Policies "master-only";
+    add_header X-Robots-Tag none;
+    add_header X-Download-Options noopen;
+    
+    # Remove X-Powered-By, which is an information leak
+    fastcgi_hide_header X-Powered-By;
+        
+    # config to don't allow the browser to render the page inside an frame or iframe
+    # and avoid clickjacking http://en.wikipedia.org/wiki/Clickjacking
+    # if you need to allow [i]frames, you can use SAMEORIGIN or even set an uri with ALLOW-FROM uri
+    # https://developer.mozilla.org/en-US/docs/HTTP/X-Frame-Options
+    #add_header X-Frame-Options SAMEORIGIN always;
+        
+    #multi domain X-Frame-Options     
+    add_header X-Frame-Options "ALLOW-FROM http://10.10.1.12:*/ http://10.10.1.12/*" always;
+    
+
+    #add_header X-Frame-Options "ALLOW-FROM https://codeitworld.com/" always;
+    #add_header "Strict-Transport-Security : max-age=15768000; includeSubDomains; preload";
+    add_header Strict-Transport-Security "max-age=31536000; includeSubdomains;";
+        
+    # kill cache
+    add_header Last-Modified $date_gmt;
+    #add_header Cache-Control 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0';
+    if_modified_since off;
+    expires off;
+    etag off;
+    proxy_no_cache 1;
+    proxy_cache_bypass 1;
+    
+    server {
+        listen 80 default_server;
+        listen [::]:80 ipv6only=on default_server;
+        server_tokens off;
+        charset utf-8;
+        root /app;
+        index index.php index.htm index.html;
+            location / {
+                try_files $uri $uri/ =404;
+            }
+            
+            error_page 500 502 503 504 /50x.html;
+            location = /50x.html {
+                root /usr/share/nginx/html;
+            }
+        
+            error_page 401 403 404  /index.html;
+            location = /index.html {
+                root /usr/share/nginx/html;
+            }
+    
+            error_page   500 502 503 504  /index.html;
+            location = / {
+                root   /usr/share/nginx/html;
+            }
+            
+            # pass the PHP scripts to FastCGI server listening on 127.0.0.1:9000
+            location ~ \.php$ {
+                try_files $uri =404;
+                #fastcgi_pass 0.0.0.0:9000;
+                fastcgi_pass unix:/var/run/php7-fpm.sock;
+                fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+                fastcgi_param SCRIPT_NAME $fastcgi_script_name;
+                fastcgi_index index.php;
+                include fastcgi_params;
+            }
+    }
+    
+    server {
+        listen 443 ssl http2;
+        listen [::]:443 ipv6only=on; 
+        server_name bbo.pln.co.id;
+
+        # Path certificate ssl
+        ssl_certificate /etc/nginx/ssl/bbo.pln.co.id.crt;
+        ssl_certificate_key /etc/nginx/ssl/bbo.pln.co.id.key;
+
+        # TLS
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ecdh_curve X25519:sect571r1:secp521r1:secp384r1;
+        ssl_session_timeout 1d;
+        ssl_session_cache shared:SSL:50m;
+        ssl_session_tickets off;
+        ssl_ciphers 'TLS13+AESGCM+AES128:TLS13+AESGCM+AES256:TLS13+CHACHA20:EECDH+AESGCM:EECDH+CHACHA20';
+        ssl_prefer_server_ciphers off;
+        #Enable 0-RTT support for TLS 1.3
+        ssl_early_data on;
+        proxy_set_header Early-Data $ssl_early_data;
+
+        # Disable header cookies php
+        #set_cookie_flag HttpOnly secure;
+
+        #if (!-e $request_filename){
+        #   rewrite /.* /index.php;
+        #}
+        
+        ##Hide index.php
+        #index index.php;
+        #try_files $uri $uri/ /index.php?r=$request_uri;
+        
+        #if ($request_uri ~* "^(.*/)index\.(html?|php)\/?(.*)$") {
+        #    return 301 $1$3; 
+        #}
+        
+        #if ($request_uri ~* "^(.*/)index\.php$") {
+        #return 301 $1;
+        #}
+   
+        ##
+        # Performance and Cache
+        ##
+
+        #See - https://www.nginx.com/blog/thread-pools-boost-performance-9x/
+        aio threads;
+
+        #Simple DOS mitigation
+        ##Max c/s by ip
+        #limit_conn_zone $binary_remote_addr zone=limit_per_ip:10m;
+        #limit_conn limit_per_ip 100;
+
+        ##Max rq/s by ip
+        #limit_req_zone $binary_remote_addr zone=allips:10m rate=400r/s;
+        #limit_req zone=allips burst=400 nodelay;
+        #add_header X-Frame-Options "ALLOW-FROM https://bbo.pln.co.id/" always;
+        #add_header X-Frame-Options "ALLOW-FROM http://10.71.1.187:*/" always;
+        #add_header X-Frame-Options "ALLOW-FROM https://developers.google.com/" always;
+        #add_header X-Frame-Options "ALLOW-FROM https://maps.googleapis.com/" always;
+        # with Content Security Policy (CSP) enabled(and a browser that supports it(http://caniuse.com/#feat=contentsecuritypolicy),
+        # you can tell the browser that it can only download content from the domains you explicitly allow
+        # http://www.html5rocks.com/en/tutorials/security/content-security-policy/
+        # https://www.owasp.org/index.php/Content_Security_Policy
+        # I need to change our application code so we can increase security by disabling 'unsafe-inline' 'unsafe-eval'
+        # directives for css and js(if you have inline css or js, you will need to keep it too).
+        # more: http://www.html5rocks.com/en/tutorials/security/content-security-policy/#inline-code-considered-harmful
+        
+        #add_header Conten/dashboard/index.phpt-Security-Policy "connect-src 'self'; sandbox allow-forms allow-scripts; report-uri /some-report-uri; child-src 'self'; form-action 'self'; frame-ancestors 'none'; plugin-types application/pdf;";
+         #   set $CSP_image "img-src 'self' data: https://developers.google.com/ https://maps.googleapis.com/ http://10.14.158.187/ https://bbo.pln.co.id/;";
+         #   set $CSP_script "script-src 'self' https://developers.google.com/ https://maps.googleapis.com/ http://10.14.158.187/ https://bbo.pln.co.id/;";
+         #   set $CSP_style "style-src 'self' https://developers.google.com/ https://maps.googleapis.com/ http://10.14.158.187/ https://bbo.pln.co.id/;";
+         #   set $CSP_font "font-src 'self' https://developers.google.com/ https://maps.googleapis.com/ http://10.14.158.187/ https://bbo.pln.co.id/;";
+         #   set $CSP_frame "frame-src 'self' https://developers.google.com/ https://maps.googleapis.com/ http://10.14.158.187/ https://bbo.pln.co.id/;";
+         #   set $CSP_object "object-src 'self' https://developers.google.com/ https://maps.googleapis.com/ http://10.14.158.187/ https://bbo.pln.co.id/;";
+         #   set $CSP_media "media-src 'self' https://developers.google.com/ https://maps.googleapis.com/ http://10.14.158.187/ https://bbo.pln.co.id/;";
+         #   set $CSP "default-src  'self' http://10.14.158.187/ https://bbo.pln.co.id/ ${CSP_image} ${CSP_script} ${CSP_style} ${CSP_font} ${CSP_frame} ${CSP_object} ${CSP_media}";
+        #add_header Feature-Policy "geolocation none;midi none;notifications none;push none;sync-xhr none;microphone none;camera none;magnetometer none;gyroscope none;speaker none;vibrate none;fullscreen self;payment none;";
+
+        #location / {
+        # First attempt to serve request as file, then
+        # as directory, then fall back to index.php
+        #try_files $uri /index.php?q=$uri&$args;
+        #}
+
+        # redirect server error pages to the static page /50x.html
+        error_page 500 502 503 504 /50x.html;
+        location = /50x.html {
+            root /usr/share/nginx/html;
+        }
+        
+        # define error pages
+        error_page 401 403 404  /index.html;
+        location = /index.html {
+            root /usr/share/nginx/html;
+            internal;
+        }
+    
+        # redirect server error pages
+        error_page   500 502 503 504  /index.html;
+        location = / {
+            root   /usr/share/nginx/html;
+            internal;
+        }   
+
+        # pass the PHP scripts to FastCGI server listening on 127.0.0.1:9000
+        location ~ \.php$ {
+            try_files $uri =404;
+            # Choose either a socket or TCP/IP address
+            #fastcgi_pass 0.0.0.0:9000;
+            fastcgi_pass unix:/var/run/php7-fpm.sock;
+            fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+            fastcgi_param SCRIPT_NAME $fastcgi_script_name;
+            fastcgi_index index.php;
+            include fastcgi_params;
+        }
+        
+        location ~* \.(?:ico|css|js|gif|jpe?g|png)$ {
+        access_log off;
+          expires 30d;
+        }
+        
+        # Deny all attempts to access hidden files such as 
+        # .htaccess, .htpasswd, .DS_Store (Mac).
+        # deny access to . files, for security
+        location ~ /\. {
+            log_not_found off;
+            access_log off;
+            deny all;
+        }
+        
+        ##remove error favicon.ico
+        location = /favicon.ico {
+                #return 404;
+                log_not_found off;
+                access_log off;
+        }
+        
+        ##remove error robots.txt
+        location = /robots.txt  { 
+            allow all;
+            access_log off; 
+            log_not_found off; 
+        }
+    
+        ## Deny certain Referers ###
+        if ( $http_referer ~* (babes|forsale|girl|jewelry|love|nudit|organic|poker|porn|sex|teen) )
+        {
+            # return 404;
+            return 403;
+        }
+
+        ## Block some robots ##
+        if ($http_user_agent ~* msnbot|scrapbot) {
+            return 403;
+        }
+
+        ## Only allow these request methods ##
+        if ($request_method !~ ^(GET|HEAD|POST)$ ) {
+            return 444;
+            #return 404;
+        }
+        
+        ## Block download agents ##
+             if ($http_user_agent ~* LWP::Simple|BBBike|wget) {
+                    return 403;
+             }
+
+        ## Block some robots ##
+        if ($http_user_agent ~* msnbot|scrapbot) {
+            return 403;
+        }
+        
+        # Remove index.php$
+        #if ($request_uri ~* "^(.*/)index\.php$") {
+        #    return 301 $1;
+        #}
+        
+        # Remove index.php$
+        if ($request_uri ~* "^(.*/)index\.php/*(.*)") {
+            return 301 $1$2;
+        }
+        
+        location / {
+            try_files $uri $uri/ /index.php?$query_string;
+        
+            # Remove from everywhere index.php
+            if ($request_uri ~* "^(.*/)index\.php(/?)(.*)") {
+                return 301 $1$3;
+            }
+        }
+
+
+        # Remove trailing slash.
+        if (!-d $request_filename) {
+            rewrite ^/(.+)/$ /$1 permanent;
+        }
+        
+        # Clean Double Slashes
+        if ($request_uri ~* "\/\/") {
+          rewrite ^/(.*) /$1 permanent;
+        }
+   
+        # Uncomment if your server is build with the ngx_pagespeed module
+        # This module is currently not supported.
+        #pagespeed off;
+        location ~ /\.ht {
+            deny all;
+        } 
+        
+        location ~ ^\/(?:build|tests|config|lib|3rdparty|templates|data)\/ {
+        deny all;
+        }
+        
+        location ~ ^\/(?:\.|autotest|occ|issue|indie|db_|console) {
+            deny all;
+        }
+        
+        location ~ ^\/(?:index|remote|public|cron|core\/ajax\/update|status|ocs\/v[12]|updater\/.+|oc[ms]-provider\/.+)\.php(?:$|\/) {
+            fastcgi_split_path_info ^(.+?\.php)(\/.*|)$;
+            set $path_info $fastcgi_path_info;
+            try_files $fastcgi_script_name =404;
+            include fastcgi_params;
+            fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+            fastcgi_param PATH_INFO $path_info;
+            fastcgi_param HTTPS on;
+            # Avoid sending the security headers twice
+            fastcgi_param modHeadersAvailable true;
+            # Enable pretty urls
+            fastcgi_param front_controller_active true;
+            #fastcgi_pass php-handler;
+            fastcgi_intercept_errors on;
+            fastcgi_request_buffering off;
+        }
+    
+        location ~ ^\/(?:updater|oc[ms]-provider)(?:$|\/) {
+            try_files $uri/ =404;
+            index index.php;
+        }
+
+        # Adding the cache control header for js, css and map files
+        # Make sure it is BELOW the PHP block
+        location ~ \.(?:css|js|woff2?|svg|gif|map)$ {
+        try_files $uri /index.php$request_uri;
+
+        # Optional: Don't log access to assets
+        access_log off;
+        }
+    
+        location ~ \.(?:png|html|ttf|ico|jpg|jpeg|bcmap)$ {
+            try_files $uri /index.php$request_uri;
+            # Optional: Don't log access to other assets
+            access_log off;
+        }
+        
+        # JS
+        location ~* ^/static/js/$ {
+            add_header Cache-Control public; # Indicate that the resource may be cached by public caches like web caches for instance, if set to 'private' the resource may only be cached by client's browser.
+            expires     24h; # Indicate that the resource can be cached for 24 hours
+        }
+    
+        # CSS
+        location ~* ^/static/css/$ {
+            add_header Cache-Control public;
+            # Equivalent to above:
+            expires     86400; # Indicate that the resource can be cached for 86400 seconds (24 hours)
+            etag on; # Add an ETag header with an identifier that can be stored by the client
+        }
+    
+        # Images
+        location ~* ^/static/images/$ {
+            add_header Cache-Control must-revalidate; # Indicate that the resource must be revalidated at each access
+            etag on;
+        }
+        ##jika prod return 301 di aktifkan
+        #return 301 https:/codeitworld.com$request_uri;
+    }
+} 
+##End http
